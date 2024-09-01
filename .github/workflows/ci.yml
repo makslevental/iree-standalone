@@ -1,0 +1,105 @@
+name: CI Build
+
+on:
+  workflow_call:
+  workflow_dispatch:
+  pull_request:
+  merge_group:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: ci-build-${{ github.event.number || github.sha }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    name: Build IREE (${{ matrix.runs-on }}, ASSERTIONS)
+    runs-on: ${{ matrix.runs-on }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runs-on: [macos-14, ubuntu-22.04, windows-2019]
+    env:
+      CACHE_DIR: ${{ github.workspace }}/.container-cache
+      CACHE_KEY: ${{ matrix.runs-on }}-build-${{ format('{0}-{1}', github.ref_name, github.run_number) }}
+    steps:
+      - name: Set unified TZ
+        uses: szenius/set-timezone@v2.0
+        with:
+          # this is an arbitrary choice
+          timezoneLinux: "Asia/Singapore"
+          timezoneMacos: "Asia/Singapore"
+          timezoneWindows: "Singapore Standard Time"
+
+      - name: "Checking out repository"
+        run: |
+          if [ ${{ matrix.runs-on }} == "windows-2019" ]; then
+            mkdir -p -m 777 /d 
+          else
+            sudo mkdir -p -m 777 /d 
+          fi
+          cd /d
+          git clone --recursive --depth 1 ${{ github.server_url }}/${{ github.repository }} i
+
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Setup Cpp
+        if: ${{ matrix.runs-on == 'ubuntu-22.04' || matrix.runs-on == 'windows-2019' }}
+        uses: aminya/setup-cpp@v1
+        with:
+          compiler: llvm
+          vcvarsall: true
+          cmake: true
+          ninja: true
+          ccache: true
+
+      - name: Install deps
+        if: ${{ matrix.runs-on == 'macos-14' }}
+        run: |
+          brew install ccache ninja
+
+      - name: Python deps
+        run: |
+          pip install "numpy<2" pyyaml "pybind11[global]==2.10.3" nanobind
+
+      - name: Enable cache
+        uses: actions/cache/restore@v3
+        with:
+          path: ${{ env.CACHE_DIR }}
+          key: ${{ env.CACHE_KEY }}
+          restore-keys: ${{ matrix.runs-on }}-build-
+
+      - name: Build packages
+        run: |
+          cd /d/i
+          export cache_dir=${{ env.CACHE_DIR }}
+          bash build_iree.sh
+
+      - name: Create artifacts
+        if: ${{ !cancelled() }}
+        run: |
+          cd /d/i
+          tar cf iree-dist-${{ matrix.runs-on }}.tar iree-install
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: ${{ matrix.runs-on }}_release_packages
+          path: /d/i/iree-dist-${{ matrix.runs-on }}.tar
+          if-no-files-found: warn
+
+      - name: Save cache
+        uses: actions/cache/save@v3
+        with:
+          path: ${{ env.CACHE_DIR }}
+          key: ${{ env.CACHE_KEY }}
+

@@ -1,5 +1,5 @@
 [submodule "third_party/iree"]
-	path = third_party/iree
+	path = deps/iree
 	url = https://github.com/makslevental/iree.git
 	shallow = true
 	branch = cmake-modules
