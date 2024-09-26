@@ -88,5 +88,4 @@ cmake --build "$build_dir" -- -k 0
 echo "Installing"
 echo "----------"
 echo "Install to: $install_dir"
-cmake --build "$build_dir" --target iree-install-dist
-
+cmake --build "$build_dir" --target install
